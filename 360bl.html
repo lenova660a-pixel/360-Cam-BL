@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>360 Spin Master</title>
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    /* Базовый сброс и шрифты в стиле современных систем */
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; user-select: none; -webkit-user-select: none; }
+    
+    html, body { width: 100%; height: 100vh; height: calc(var(--vh, 1vh) * 100); overflow: hidden; background-color: #000000; color: #ffffff; }
+    body { display: flex; flex-direction: column; justify-content: space-between; position: relative; }
+    
+    /* Хедер */
+    header { padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 20; flex-shrink: 0; }
+    header h1 { font-size: 20px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px; }
+    .badge { background: #1c1c1e; padding: 6px 14px; border-radius: 16px; font-size: 13px; color: #8e8e93; font-weight: 500; }
+
+    /* Область камеры */
+    .view-wrapper { position: relative; flex: 1; width: 100%; min-height: 0; background: #000000; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 32px 32px 0 0; margin-top: 10px; }
+    video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+    
+    #ghostCanvas { opacity: 0.35; pointer-events: none; z-index: 2; }
+    #viewerCanvas { display: none; z-index: 5; cursor: grab; }
+    #viewerCanvas:active { cursor: grabbing; }
+
+    /* Сетка и горизонт */
+    .grid-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; display: flex; align-items: center; justify-content: center; }
+    .guide-box { width: 200px; height: 200px; border: 1.5px solid rgba(255, 255, 255, 0.2); border-radius: 24px; position: relative; }
+    .guide-box::before, .guide-box::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.5); }
+    .guide-box::before { width: 16px; height: 1.5px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .guide-box::after { width: 1.5px; height: 16px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    
+    .horizon-line { position: absolute; width: 100%; height: 1px; background: rgba(52, 199, 89, 0.8); top: 50%; left: 0; transform-origin: center; transition: transform 0.1s linear; pointer-events: none; z-index: 4; }
+
+    /* Панель управления (Bottom Sheet) */
+    .controls { 
+      background: #1c1c1e; 
+      padding: 24px 20px;
+      padding-bottom: max(32px, env(safe-area-inset-bottom)); 
+      border-top-left-radius: 24px;
+      border-top-right-radius: 24px;
+      display: flex; 
+      flex-direction: column; 
+      gap: 16px; 
+      z-index: 20; 
+      flex-shrink: 0; 
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+    }
+
+    /* Сегментированные контролы в стиле iOS/Mono */
+    .mode-bar { display: flex; background: #000000; padding: 4px; border-radius: 14px; }
+    .mode-btn { flex: 1; padding: 10px; border: none; background: transparent; color: #8e8e93; font-size: 14px; font-weight: 500; border-radius: 10px; cursor: pointer; transition: all 0.2s ease; }
+    .mode-btn.active { background: #2c2c2e; color: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+
+    .sub-mode-bar { display: flex; gap: 8px; justify-content: center; }
+    .sub-btn { background: #2c2c2e; color: #8e8e93; border: none; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
+    .sub-btn.active { background: #ffffff; color: #000000; }
+
+    .lock-bar { display: flex; gap: 8px; justify-content: center; }
+    .lock-btn { background: #2c2c2e; color: #8e8e93; border: none; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 4px; }
+    .lock-btn.locked { background: #34c759; color: #ffffff; }
+
+    .action-row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+    
+    /* Второстепенные кнопки */
+    .btn-secondary { background: #2c2c2e; color: #ffffff; border: none; padding: 14px 20px; border-radius: 16px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-secondary:active { background: #3a3a3c; }
+    .btn-secondary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Кнопка съемки (Shutter) */
+    .shutter-btn { width: 64px; height: 64px; border-radius: 50%; background: #000000; border: 4px solid #ffffff; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s ease; }
+    .shutter-btn.recording { border-color: #ff3b30; }
+    .shutter-inner { width: 48px; height: 48px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #000000; text-transform: uppercase; transition: all 0.2s ease; }
+    .shutter-btn.recording .shutter-inner { background: #ff3b30; color: #ffffff; border-radius: 12px; width: 28px; height: 28px; }
+
+    /* Уведомления */
+    .toast { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); background: #2c2c2e; color: #ffffff; padding: 12px 24px; border-radius: 24px; font-size: 13px; font-weight: 500; pointer-events: none; opacity: 0; transition: opacity 0.3s ease, transform 0.3s ease; z-index: 30; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transform: translate(-50%, -10px); }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    /* Модальное окно (BottomSheet) */
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; justify-content: center; align-items: flex-end; padding: 0; backdrop-filter: blur(4px); }
+    .modal-content { background: #1c1c1e; border-radius: 24px 24px 0 0; padding: 24px; width: 100%; max-height: 80vh; overflow-y: auto; animation: slideUp 0.3s ease-out; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    
+    .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #ffffff; }
+    .modal-body { font-size: 14px; color: #a1a1a6; margin-bottom: 24px; line-height: 1.5; }
+    textarea { width: 100%; height: 100px; background: #000000; color: #ffffff; border: 1px solid #2c2c2e; border-radius: 12px; padding: 12px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; margin-top: 12px; resize: none; }
+    
+    .modal-actions { display: flex; gap: 12px; justify-content: flex-end; flex-direction: column; }
+    .modal-actions button { width: 100%; padding: 16px; border-radius: 16px; font-size: 15px; }
+    .btn-primary { background: #ffffff; color: #000000; border: none; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-primary:active { background: #e5e5ea; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>360° Spin Master</h1>
+    <div class="badge" id="frameCounter">0 / 36</div>
+  </header>
+
+  <div class="view-wrapper">
+    <video id="cameraFeed" autoplay playsinline muted></video>
+    <canvas id="ghostCanvas"></canvas>
+    <canvas id="viewerCanvas"></canvas>
+    
+    <div class="grid-overlay" id="gridOverlay">
+      <div class="guide-box"></div>
+      <div class="horizon-line" id="horizonLine"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toastMsg">Готово!</div>
+
+  <div class="controls">
+    <div class="mode-bar">
+      <button class="mode-btn active" id="btnCaptureMode" onclick="setMode('capture')">📷 Съемка</button>
+      <button class="mode-btn" id="btnPreviewMode" onclick="setMode('preview')">🔄 Просмотр</button>
+    </div>
+
+    <div class="sub-mode-bar" id="subModeBar">
+      <button class="sub-btn active" id="btnAutoMode" onclick="setTriggerMode('auto')">Авто (Гироскоп)</button>
+      <button class="sub-btn" id="btnManualMode" onclick="setTriggerMode('manual')">Ручной</button>
+    </div>
+
+    <div class="lock-bar" id="lockBar">
+      <button class="lock-btn" id="btnLockFocus" onclick="toggleFocusLock()">🔒 Фокус</button>
+      <button class="lock-btn" id="btnLockExposure" onclick="toggleExposureLock()">🔒 Экспозиция</button>
+    </div>
+
+    <div class="action-row">
+      <button class="btn-secondary" onclick="clearFrames()">Сброс</button>
+      
+      <button class="shutter-btn" id="shutterBtn" onclick="handleShutterClick()">
+        <div class="shutter-inner" id="shutterText"></div>
+      </button>
+
+      <button class="btn-secondary" id="exportBtn" onclick="openExportModal()" disabled>Экспорт</button>
+    </div>
+  </div>
+
+  <div class="modal" id="exportModal">
+    <div class="modal-content">
+      <div class="modal-title">Экспорт проекта</div>
+      <div class="modal-body">
+        <p><strong>Вариант 1:</strong> Скачать файл и вставить его код в блок <b>«Custom HTML»</b> на сайте.</p>
+        <br>
+        <p><strong>Вариант 2:</strong> Загрузить файл на сайт и использовать iframe-код:</p>
+        <textarea id="wpIframeCode" readonly></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="downloadHTMLFile()">Скачать HTML</button>
+        <button class="btn-secondary" onclick="closeExportModal()">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // JS-код полностью сохранен из оригинала для обеспечения работоспособности
+    function setRealVH() {
+      let vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+    setRealVH();
+    window.addEventListener('resize', setRealVH);
+
+    const video = document.getElementById('cameraFeed');
+    const ghostCanvas = document.getElementById('ghostCanvas');
+    const ghostCtx = ghostCanvas.getContext('2d');
+    const viewerCanvas = document.getElementById('viewerCanvas');
+    const viewerCtx = viewerCanvas.getContext('2d');
+    const frameCounter = document.getElementById('frameCounter');
+    const gridOverlay = document.getElementById('gridOverlay');
+    const horizonLine = document.getElementById('horizonLine');
+    const exportBtn = document.getElementById('exportBtn');
+    const toastMsg = document.getElementById('toastMsg');
+    const exportModal = document.getElementById('exportModal');
+    const shutterBtn = document.getElementById('shutterBtn');
+    const shutterText = document.getElementById('shutterText');
+    const subModeBar = document.getElementById('subModeBar');
+    const lockBar = document.getElementById('lockBar');
+    const btnLockFocus = document.getElementById('btnLockFocus');
+    const btnLockExposure = document.getElementById('btnLockExposure');
+
+    let videoTrack = null;
+    let frames = [];
+    let currentMode = 'capture';
+    let triggerMode = 'auto';
+    let isAutoRecording = false;
+    let isFocusLocked = false;
+    let isExposureLocked = false;
+    let savedFocusDistance = null;
+    let savedEV = null;
+    let currentIdx = 0;
+    let isDragging = false;
+    let startX = 0;
+
+    let lastAngle = null;
+    let smoothedAlpha = null;
+    let lastCaptureTime = 0;
+    const STEP_ANGLE = 10;
+    const CAPTURE_COOLDOWN = 400;
+
+    async function initCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Нужен HTTPS для работы камеры!');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        video.srcObject = stream;
+        videoTrack = stream.getVideoTracks()[0];
+      } catch (e) {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          if (videoDevices.length > 0) {
+            let backCam = videoDevices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('rear')) || videoDevices[videoDevices.length - 1];
+            const fallbackStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: backCam.deviceId } },
+              audio: false
+            });
+            video.srcObject = fallbackStream;
+            videoTrack = fallbackStream.getVideoTracks()[0];
+          }
+        } catch (err) {
+          showToast('Ошибка доступа к камере');
+        }
+      }
+    }
+
+    async function enforceLockState() {
+      if (!videoTrack) return;
+      try {
+        const constraints = { advanced: [] };
+        
+        if (isFocusLocked) {
+          if (savedFocusDistance !== null) {
+            constraints.advanced.push({ focusMode: 'manual', focusDistance: savedFocusDistance });
+          } else {
+            constraints.advanced.push({ focusMode: 'locked' });
+          }
+        }
+        
+        if (isExposureLocked) {
+          if (savedEV !== null) {
+            constraints.advanced.push({ exposureCompensation: savedEV });
+          } else {
+            constraints.advanced.push({ exposureMode: 'locked' });
+          }
+        }
+
+        if (constraints.advanced.length > 0) {
+          await videoTrack.applyConstraints(constraints);
+        }
+      } catch (err) {
+        console.warn("Ошибка подтягивания ограничений фокуса:", err);
+      }
+    }
+
+    async function toggleFocusLock() {
+      if (!videoTrack) return showToast('Камера не готова');
+
+      isFocusLocked = !isFocusLocked;
+
+      try {
+        const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+        const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
+
+        if (isFocusLocked) {
+          savedFocusDistance = settings.focusDistance || (capabilities.focusDistance ? capabilities.focusDistance.min : null);
+          await enforceLockState();
+          btnLockFocus.classList.add('locked');
+          showToast('Фокус заблокирован 🔒');
+        } else {
+          savedFocusDistance = null;
+          await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+          btnLockFocus.classList.remove('locked');
+          showToast('Автофокус включен 🔓');
+        }
+      } catch (err) {
+        btnLockFocus.classList.toggle('locked', isFocusLocked);
+        showToast(isFocusLocked ? 'Фокус зафиксирован 🔒' : 'Автофокус включен 🔓');
+      }
+    }
+
+    async function toggleExposureLock() {
+      if (!videoTrack) return showToast('Камера не готова');
+
+      isExposureLocked = !isExposureLocked;
+
+      try {
+        const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+        const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
+
+        if (isExposureLocked) {
+          savedEV = settings.exposureCompensation !== undefined ? settings.exposureCompensation : 0;
+          await enforceLockState();
+          btnLockExposure.classList.add('locked');
+          showToast('Экспозиция заблокирована 🔒');
+        } else {
+          savedEV = null;
+          await videoTrack.applyConstraints({ advanced: [{ exposureMode: 'continuous' }] });
+          btnLockExposure.classList.remove('locked');
+          showToast('Авто-экспозиция включена 🔓');
+        }
+      } catch (err) {
+        btnLockExposure.classList.toggle('locked', isExposureLocked);
+        showToast(isExposureLocked ? 'Экспозиция зафиксирована 🔒' : 'Авто-экспозиция включена 🔓');
+      }
+    }
+
+    function setTriggerMode(mode) {
+      triggerMode = mode;
+      document.getElementById('btnAutoMode').classList.toggle('active', mode === 'auto');
+      document.getElementById('btnManualMode').classList.toggle('active', mode === 'manual');
+
+      if (isAutoRecording) {
+        stopAutoRecording();
+      } else {
+        updateShutterUI();
+      }
+
+      showToast(mode === 'auto' ? 'Режим: Авто (по гироскопу)' : 'Режим: Ручной (по кнопке)');
+    }
+
+    function handleShutterClick() {
+      if (currentMode !== 'capture') return;
+
+      if (triggerMode === 'manual') {
+        captureFrame();
+      } else {
+        if (isAutoRecording) {
+          stopAutoRecording();
+        } else {
+          startAutoRecording();
+        }
+      }
+    }
+
+    function startAutoRecording() {
+      isAutoRecording = true;
+      lastAngle = null;
+      smoothedAlpha = null;
+      
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+          .then(response => {
+            if (response === 'granted') {
+              window.addEventListener('deviceorientation', handleGyroMove, true);
+            }
+          })
+          .catch(console.error);
+      }
+
+      shutterBtn.classList.add('recording');
+      shutterText.innerText = '';
+      showToast('Авто-съемка запущенa!');
+    }
+
+    function stopAutoRecording() {
+      isAutoRecording = false;
+      shutterBtn.classList.remove('recording');
+      updateShutterUI();
+      showToast('Авто-съемка остановлена');
+    }
+
+    function updateShutterUI() {
+      shutterText.innerText = triggerMode === 'auto' ? 'СТАРТ' : '';
+    }
+
+    async function captureFrame() {
+      if (isFocusLocked || isExposureLocked) {
+        await enforceLockState();
+      }
+
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth || 1280;
+      c.height = video.videoHeight || 720;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(video, 0, 0, c.width, c.height);
+      
+      const dataUrl = c.toDataURL('image/jpeg', 0.85);
+      frames.push(dataUrl);
+
+      ghostCanvas.width = c.width;
+      ghostCanvas.height = c.height;
+      const img = new Image();
+      img.onload = () => {
+        ghostCtx.clearRect(0, 0, ghostCanvas.width, ghostCanvas.height);
+        ghostCtx.drawImage(img, 0, 0);
+      };
+      img.src = dataUrl;
+
+      updateUI();
+      if (navigator.vibrate) navigator.vibrate(40);
+      showToast(`Кадр ${frames.length} снят`);
+    }
+
+    function updateUI() {
+      frameCounter.innerText = `${frames.length} / 36`;
+      exportBtn.disabled = frames.length === 0;
+    }
+
+    function clearFrames() {
+      if (frames.length === 0) return;
+      if (confirm('Удалить все кадры?')) {
+        stopAutoRecording();
+        frames = [];
+        ghostCtx.clearRect(0, 0, ghostCanvas.width, ghostCanvas.height);
+        viewerCtx.clearRect(0, 0, viewerCanvas.width, viewerCanvas.height);
+        updateUI();
+        setMode('capture');
+        showToast('Очищено');
+      }
+    }
+
+    function setMode(mode) {
+      if (mode === 'preview' && frames.length === 0) {
+        showToast('Снимите несколько кадров!');
+        return;
+      }
+      
+      if (mode === 'preview' && isAutoRecording) {
+        stopAutoRecording();
+      }
+
+      currentMode = mode;
+      document.getElementById('btnCaptureMode').classList.toggle('active', mode === 'capture');
+      document.getElementById('btnPreviewMode').classList.toggle('active', mode === 'preview');
+
+      gridOverlay.style.display = mode === 'capture' ? 'flex' : 'none';
+      ghostCanvas.style.display = mode === 'capture' ? 'block' : 'none';
+      video.style.display = mode === 'capture' ? 'block' : 'none';
+      viewerCanvas.style.display = mode === 'preview' ? 'block' : 'none';
+      subModeBar.style.display = mode === 'capture' ? 'flex' : 'none';
+      lockBar.style.display = mode === 'capture' ? 'flex' : 'none';
+
+      if (mode === 'preview') {
+        currentIdx = 0;
+        renderViewerFrame(currentIdx);
+      }
+    }
+
+    function renderViewerFrame(index) {
+      if (!frames[index]) return;
+      const img = new Image();
+      img.onload = () => {
+        viewerCanvas.width = img.width;
+        viewerCanvas.height = img.height;
+        viewerCtx.drawImage(img, 0, 0);
+      };
+      img.src = frames[index];
+    }
+
+    viewerCanvas.addEventListener('mousedown', e => { isDragging = true; startX = e.clientX; });
+    viewerCanvas.addEventListener('touchstart', e => { isDragging = true; startX = e.touches[0].clientX; });
+    window.addEventListener('mouseup', () => isDragging = false);
+    window.addEventListener('touchend', () => isDragging = false);
+
+    window.addEventListener('mousemove', e => handleMove(e.clientX));
+    window.addEventListener('touchmove', e => handleMove(e.touches[0].clientX));
+
+    function handleMove(clientX) {
+      if (!isDragging || currentMode !== 'preview') return;
+      const deltaX = clientX - startX;
+      if (Math.abs(deltaX) > 12) {
+        if (deltaX > 0) {
+          currentIdx = (currentIdx - 1 + frames.length) % frames.length;
+        } else {
+          currentIdx = (currentIdx + 1) % frames.length;
+        }
+        renderViewerFrame(currentIdx);
+        startX = clientX;
+      }
+    }
+
+    function handleGyroMove(e) {
+      if (e.gamma !== null) {
+        horizonLine.style.transform = `rotate(${e.gamma}deg)`;
+      }
+
+      if (currentMode !== 'capture' || triggerMode !== 'auto' || !isAutoRecording) return;
+
+      let rawAlpha = e.alpha;
+      if (rawAlpha === null || rawAlpha === undefined) return;
+
+      if (smoothedAlpha === null) {
+        smoothedAlpha = rawAlpha;
+      } else {
+        let diff = rawAlpha - smoothedAlpha;
+        if (diff > 180) rawAlpha -= 360;
+        if (diff < -180) rawAlpha += 360;
+        
+        smoothedAlpha = smoothedAlpha + 0.2 * (rawAlpha - smoothedAlpha);
+        if (smoothedAlpha < 0) smoothedAlpha += 360;
+        if (smoothedAlpha >= 360) smoothedAlpha -= 360;
+      }
+
+      if (lastAngle === null) {
+        lastAngle = smoothedAlpha;
+        return;
+      }
+
+      let angleDiff = Math.abs(smoothedAlpha - lastAngle);
+      if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+      const now = Date.now();
+
+      if (angleDiff >= STEP_ANGLE && (now - lastCaptureTime) > CAPTURE_COOLDOWN) {
+        lastAngle = smoothedAlpha;
+        lastCaptureTime = now;
+        captureFrame();
+      }
+    }
+
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', handleGyroMove, true);
+    }
+
+    function showToast(msg) {
+      toastMsg.innerText = msg;
+      toastMsg.classList.add('show');
+      setTimeout(() => toastMsg.classList.remove('show'), 2000);
+    }
+
+    function openExportModal() {
+      if (frames.length === 0) return;
+      document.getElementById('wpIframeCode').value = `<iframe src="https://ваш-сайт.com/360-spin-product.html" width="100%" height="500" frameborder="0" allowfullscreen style="border:0; max-width:100%;"></iframe>`;
+      exportModal.style.display = 'flex';
+    }
+
+    function closeExportModal() {
+      exportModal.style.display = 'none';
+    }
+
+    function downloadHTMLFile() {
+      const widgetHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>360 Spin Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #ffffff; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; font-family: sans-serif; }
+    .spin-container { position: relative; width: 100%; max-width: 800px; height: 100vh; display: flex; align-items: center; justify-content: center; cursor: grab; }
+    .spin-container:active { cursor: grabbing; }
+    img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+    .hint { position: absolute; bottom: 20px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 14px; border-radius: 20px; font-size: 13px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="spin-container" id="box">
+    <img id="img" src="${frames[0]}">
+    <div class="hint">↔ Потяните для вращения 360°</div>
+  </div>
+  <script>
+    const images = ${JSON.stringify(frames)};
+    let idx = 0, startX = 0, active = false;
+    const img = document.getElementById('img');
+    const box = document.getElementById('box');
+
+    const start = x => { active = true; startX = x; };
+    const move = x => {
+      if (!active) return;
+      const dx = x - startX;
+      if (Math.abs(dx) > 10) {
+        idx = dx > 0 ? (idx - 1 + images.length) % images.length : (idx + 1) % images.length;
+        img.src = images[idx];
+        startX = x;
+      }
+    };
+    const end = () => active = false;
+
+    box.addEventListener('mousedown', e => start(e.clientX));
+    box.addEventListener('touchstart', e => start(e.touches[0].clientX));
+    window.addEventListener('mousemove', e => move(e.clientX));
+    window.addEventListener('touchmove', e => move(e.touches[0].clientX));
+    window.addEventListener('mouseup', end);
+    window.addEventListener('touchend', end);
+  <\/script>
+</body>
+</html>`;
+
+      const blob = new Blob([widgetHTML], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '360-spin-product.html';
+      a.click();
+      closeExportModal();
+      showToast('HTML сохранен!');
+    }
+
+    updateShutterUI();
+    initCamera();
+  </script>
+</body>
+</html>
